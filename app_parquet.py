@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -6,50 +5,32 @@ import pydeck as pdk
 from datetime import datetime
 import os
 
-st.set_page_config(page_title="Small Dams (Parquet Fast)", page_icon="🏞️", layout="wide")
+st.set_page_config(page_title="Small Dams (Parquet Fast, Stable)", page_icon="🏞️", layout="wide")
 
 PARQUET_PATH = "All_Dams.parquet"
 XLSX_PATH = "All_Dams.xlsx"
 
-# -------------------------
-# Loaders
-# -------------------------
 @st.cache_data(show_spinner=False)
 def load_parquet_or_convert():
-    """
-    Load from Parquet for speed.
-    If Parquet is missing but XLSX exists, read XLSX once and cache in Parquet.
-    """
-    # Try Parquet first
     try:
-        df = pd.read_parquet(PARQUET_PATH)  # needs pyarrow or fastparquet
+        df = pd.read_parquet(PARQUET_PATH)
         loaded_from = "parquet"
     except Exception:
-        df = None
-        loaded_from = None
-
-    # Fallback: build parquet from xlsx if needed
+        df, loaded_from = None, None
     if df is None and os.path.exists(XLSX_PATH):
+        import openpyxl  # explicit import for clearer error if missing
+        df = pd.read_excel(XLSX_PATH, sheet_name=0, engine="openpyxl")
+        df.columns = [str(c).strip() for c in df.columns]
         try:
-            import openpyxl  # fail early with nice error if missing
-            df = pd.read_excel(XLSX_PATH, sheet_name=0, engine="openpyxl")
-            df.columns = [str(c).strip() for c in df.columns]
-            try:
-                df.to_parquet(PARQUET_PATH, index=False)
-                loaded_from = "xlsx->parquet"
-            except Exception:
-                loaded_from = "xlsx (parquet save failed)"
-        except Exception as e:
-            raise RuntimeError(f"Could not load Parquet and XLSX fallback failed: {e}")
-
+            df.to_parquet(PARQUET_PATH, index=False)
+            loaded_from = "xlsx→parquet"
+        except Exception:
+            loaded_from = "xlsx (parquet save failed)"
     if df is None:
-        raise RuntimeError("Neither Parquet nor XLSX could be loaded. Place All_Dams.parquet or All_Dams.xlsx next to the app.")
-
-    # Normalize strings
+        raise RuntimeError("Place All_Dams.parquet or All_Dams.xlsx next to the app.")
     for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype(str).str.strip()
-
-    alias = {c.lower().replace("\\n"," "): c for c in df.columns}
+    alias = {c.lower().replace("\n", " "): c for c in df.columns}
     return df, alias, loaded_from
 
 def find_col(alias, keys):
@@ -61,7 +42,7 @@ def find_col(alias, keys):
 
 def coerce_num(series):
     if series.dtype == object:
-        series = series.str.replace(",", "", regex=False).str.replace("%","", regex=False)
+        series = series.str.replace(",", "", regex=False).str.replace("%", "", regex=False)
     return pd.to_numeric(series, errors="coerce")
 
 @st.cache_data(show_spinner=False)
@@ -70,7 +51,6 @@ def prepare(df, col_district, col_name, col_height, col_cca, col_year, col_lat, 
     df = df.dropna(subset=[col_lat, col_lon]).copy()
     df[col_lat] = coerce_num(df[col_lat]).astype("float32")
     df[col_lon] = coerce_num(df[col_lon]).astype("float32")
-
     if col_height: df[col_height] = coerce_num(df[col_height]).astype("float32")
     if col_cca:    df[col_cca]    = coerce_num(df[col_cca]).astype("float32")
     if col_year:
@@ -78,7 +58,6 @@ def prepare(df, col_district, col_name, col_height, col_cca, col_year, col_lat, 
         df["Age (years)"] = (datetime.now().year - years).astype("Int16")
     else:
         df["Age (years)"] = pd.Series([np.nan]*len(df), dtype="float32")
-
     df[col_district] = df[col_district].astype("category")
     df[col_name]     = df[col_name].astype("category")
     return df
@@ -109,9 +88,7 @@ def comparison_text(row, frame, metric_col, nice_label, col_name, scope_label="O
     diff = max_val - value
     return f"{nice_label}: {value:,.0f} — **{diff:,.0f} lower** than the highest in the {scope_label} ({max_val:,.0f} at {max_dam})."
 
-# -------------------------
-# Load
-# -------------------------
+# ---- Load
 try:
     df, alias, loaded_from = load_parquet_or_convert()
 except Exception as e:
@@ -134,22 +111,17 @@ if missing:
 
 df = prepare(df, col_district, col_name, col_height, col_cca, col_year, col_lat, col_lon)
 
-# -------------------------
-# UI + Map
-# -------------------------
-st.title("🏞️ Small Dams Explorer (Parquet)")
-st.caption("Loads super fast from Parquet. " + (f"Source: {loaded_from}" if loaded_from else ""))
+# ---- UI
+st.caption("Loads super fast from Parquet. Source: " + (loaded_from or "unknown"))
 
-cols = st.columns([1,1,1])
-districts = ["All"] + sorted([str(x) for x in df[col_district].dropna().unique().tolist()])
-with cols[0]:
+left, right, _ = st.columns([1,1,1])
+with left:
+    districts = ["All"] + sorted([str(x) for x in df[col_district].dropna().unique().tolist()])
     district = st.selectbox("District", districts, index=0)
 scope_df = df if district == "All" else df[df[col_district].astype(str) == district]
-dams = ["All"] + sorted([str(x) for x in scope_df[col_name].dropna().unique().tolist()])
-with cols[1]:
+with right:
+    dams = ["All"] + sorted([str(x) for x in scope_df[col_name].dropna().unique().tolist()])
     dam = st.selectbox("Dam", dams, index=0)
-with cols[2]:
-    perf_mode = st.toggle("Performance mode (skip map)", value=False)
 
 st.markdown("---")
 c1, c2 = st.columns([1,2])
@@ -173,7 +145,7 @@ with c1:
 
 with c2:
     st.subheader("🗺️ Map")
-    if not perf_mode:
+    try:
         center_lat = float(scope_df[col_lat].median()) if len(scope_df) else 30.0
         center_lon = float(scope_df[col_lon].median()) if len(scope_df) else 70.0
         mdf = scope_df[[col_lon, col_lat, col_name, col_district]].copy()
@@ -183,63 +155,51 @@ with c2:
         base = pdk.Layer(
             "TileLayer",
             data="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-            min_zoom=0,
-            max_zoom=19,
-            tile_size=256,
+            min_zoom=0, max_zoom=19, tile_size=256,
             subdomains=["a","b","c","d"],
         )
-
         layer_all = pdk.Layer(
             "ScatterplotLayer",
             data=mdf[~mdf["is_selected"]],
-            get_position=[col_lon, col_lat],
-            get_radius=2000,
-            get_fill_color=[30, 30, 30, 160],
-            get_line_color=[255,255,255,120],
-            line_width_min_pixels=0.5,
-            pickable=True,
+            get_position=[col_lon, col_lat], get_radius=2000,
+            get_fill_color=[30,30,30,160], get_line_color=[255,255,255,120],
+            line_width_min_pixels=0.5, pickable=True,
         )
-
         layer_sel = pdk.Layer(
             "ScatterplotLayer",
             data=mdf[mdf["is_selected"]],
-            get_position=[col_lon, col_lat],
-            get_radius=4000,
-            get_fill_color=[255, 215, 0, 220],
-            get_line_color=[255,255,255,255],
-            line_width_min_pixels=2,
-            pickable=True,
+            get_position=[col_lon, col_lat], get_radius=4000,
+            get_fill_color=[255,215,0,220], get_line_color=[255,255,255,255],
+            line_width_min_pixels=2, pickable=True,
         )
-
-        tooltip = {"html": f"<b>{col_name}</b>: {{{{{col_name}}}}}<br/><b>District</b>: {{{{{col_district}}}}}"}
-
         deck = pdk.Deck(
             initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=8),
             layers=[base, layer_all, layer_sel],
-            tooltip=tooltip,
+            tooltip={"html": f"<b>{col_name}</b>: {{{{{col_name}}}}}<br/><b>District</b>: {{{{{col_district}}}}}"},
             map_provider=None,
         )
         st.pydeck_chart(deck, use_container_width=True)
-    else:
-        st.info("Performance mode is ON — map skipped.")
+    except Exception as e:
+        st.warning(f"Map failed to render (showing table instead). Reason: {e}")
+        st.table(mdf[[col_name, col_district, col_lat, col_lon]])
 
-# Rankings
+# ---- Rankings (use st.table to avoid CSS preloading issue)
 st.markdown("---")
 tabs = st.tabs(["Organization-wide"] + ([f"{district} only"] if district != "All" else []))
 
 with tabs[0]:
     st.markdown("### Top by Height (ft)")
-    st.dataframe(build_rank_table(df, col_name, col_district, col_height, "Height (ft)"), use_container_width=True)
+    st.table(build_rank_table(df, col_name, col_district, col_height, "Height (ft)"))
     st.markdown("### Top by C.C.A (Acres)")
-    st.dataframe(build_rank_table(df, col_name, col_district, col_cca, "C.C.A (Acres)"), use_container_width=True)
+    st.table(build_rank_table(df, col_name, col_district, col_cca, "C.C.A (Acres)"))
     st.markdown("### Top by Age (years)")
-    st.dataframe(build_rank_table(df, col_name, col_district, "Age (years)", "Age (years)"), use_container_width=True)
+    st.table(build_rank_table(df, col_name, col_district, "Age (years)", "Age (years)"))
 
 if district != "All":
     with tabs[1]:
         st.markdown(f"### Top by Height (ft) — {district}")
-        st.dataframe(build_rank_table(scope_df, col_name, col_district, col_height, "Height (ft)"), use_container_width=True)
+        st.table(build_rank_table(scope_df, col_name, col_district, col_height, "Height (ft)"))
         st.markdown(f"### Top by C.C.A (Acres) — {district}")
-        st.dataframe(build_rank_table(scope_df, col_name, col_district, col_cca, "C.C.A (Acres)"), use_container_width=True)
+        st.table(build_rank_table(scope_df, col_name, col_district, col_cca, "C.C.A (Acres)"))
         st.markdown(f"### Top by Age (years) — {district}")
-        st.dataframe(build_rank_table(scope_df, col_name, col_district, "Age (years)", "Age (years)"), use_container_width=True)
+        st.table(build_rank_table(scope_df, col_name, col_district, "Age (years)", "Age (years)"))

@@ -1,4 +1,5 @@
-streamlit==1.38.0
+# roll back Streamlit to a stable build that avoids the CSS preload glitch
+streamlit==1.36.0
 pandas==2.2.2
 pydeck==0.9.1
 numpy==1.26.4
