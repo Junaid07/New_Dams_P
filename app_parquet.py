@@ -10,9 +10,6 @@ st.set_page_config(page_title="Small Dams — Overview & Filters", page_icon="�
 PARQUET_PATH = "All_Dams.parquet"
 XLSX_PATH = "All_Dams.xlsx"
 
-# -------------------------
-# Loaders
-# -------------------------
 @st.cache_data(show_spinner=False)
 def load_parquet_or_convert():
     try:
@@ -31,7 +28,6 @@ def load_parquet_or_convert():
             loaded_from = "xlsx (parquet save failed)"
     if df is None:
         raise RuntimeError("Place All_Dams.parquet or All_Dams.xlsx next to the app.")
-    # Normalize strings and header aliases
     for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype(str).str.strip()
     alias = {c.lower().replace("\\n"," ").replace("  "," ").strip(): c for c in df.columns}
@@ -48,7 +44,7 @@ def best_match(alias, include_words, exclude_words=None):
             candidates.append((len(akey), original))
     if not candidates:
         return None
-    candidates.sort(reverse=True)  # most specific
+    candidates.sort(reverse=True)
     return candidates[0][1]
 
 def coerce_num(series):
@@ -89,18 +85,15 @@ def cmp_sentence(row, frame, metric_col, unit, col_name, scope_label="organizati
     diff = max_val - value
     return f"{unit['label']}: **{diff:,.0f} {unit['abbr']} less** than the highest in the {scope_label} ({max_val:,.0f} {unit['abbr']} at {max_dam})."
 
-# -------------------------
 # Load
-# -------------------------
 df, alias, loaded_from = load_parquet_or_convert()
 
-# Column detection
+# Columns
 col_district = best_match(alias, ["district"])
 col_name     = best_match(alias, ["name of dam"]) or best_match(alias, ["dam name"])
 col_height   = best_match(alias, ["height"])
 col_cca      = best_match(alias, ["c.c.a"]) or best_match(alias, ["cca"])
 col_year     = best_match(alias, ["year of completion"]) or best_match(alias, ["year"])
-
 col_type     = best_match(alias, ["type of dam"])
 col_cost     = best_match(alias, ["completion cost"])
 col_gross    = best_match(alias, ["gross storage capacity"])
@@ -121,9 +114,7 @@ if missing:
 
 df = prepare(df, col_district, col_name, col_height, col_cca, col_year)
 
-# -------------------------
 # Title
-# -------------------------
 st.markdown(
     """
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
@@ -136,13 +127,10 @@ st.markdown(
 )
 st.caption("Parquet-optimized. Source: " + (loaded_from or "unknown"))
 
-# -------------------------
 # Tabs
-# -------------------------
 tab_overview, tab_explore = st.tabs(["Overview", "Explore & Filter"])
 
 with tab_overview:
-    # Filters
     left, right = st.columns([1,1])
     with left:
         districts = ["All"] + sorted([str(x) for x in df[col_district].dropna().unique().tolist()])
@@ -155,7 +143,7 @@ with tab_overview:
     st.markdown("---")
     c1, c2 = st.columns([1,1])
 
-    # Left: selected + comparisons
+    # Left: selected + comparisons + DETAILS (restored)
     with c1:
         st.markdown(f"## Selected Dam: {('—' if dam=='All' else dam)}")
         if dam != "All":
@@ -169,10 +157,51 @@ with tab_overview:
                 st.write(cmp_sentence(row, scope_df, col_height, {"label":"Height (ft)", "abbr":"ft"}, col_name, district))
                 st.write(cmp_sentence(row, scope_df, col_cca, {"label":"C.C.A (Acres)", "abbr":"Acres"}, col_name, district))
                 st.write(cmp_sentence(row, scope_df, "Age (years)", {"label":"Age (years)", "abbr":"years"}, col_name, district))
+
+            # Details cards
+            st.markdown("---")
+            st.subheader("📋 Details")
+            st.markdown(
+                """
+                <style>
+                .card {background:#fff;border:1px solid #e6e6e6;border-radius:16px;padding:16px 18px;
+                       box-shadow:0 2px 8px rgba(0,0,0,0.04);margin-bottom:12px;height:100%}
+                .card .label {font-size:0.95rem;font-weight:600;color:#444}
+                .card .value {font-size:1.6rem;font-weight:800;margin-top:6px;color:#111;word-break:break-word}
+                </style>
+                """, unsafe_allow_html=True)
+            def render_card(title, val):
+                disp = "—" if pd.isna(val) or val == "" else val
+                st.markdown(f'<div class="card"><div class="label">{title}</div><div class="value">{disp}</div></div>', unsafe_allow_html=True)
+            def fmt_num(v, suffix=""):
+                if pd.isna(v): return "—"
+                try: val = float(v); return f"{val:,.0f}{(" " + suffix) if suffix else ""}"
+                except Exception: return f"{v} {suffix}".strip()
+            fields = [
+                ("Type of Dam", row.get(col_type) if col_type else np.nan),
+                ("Completion Cost (million)", fmt_num(row.get(col_cost)) if col_cost else "—"),
+                ("Gross Storage Capacity (Aft)", fmt_num(row.get(col_gross)) if col_gross else "—"),
+                ("Live storage (Aft)", fmt_num(row.get(col_live)) if col_live else "—"),
+                ("C.C.A. (Acres)", fmt_num(row.get(col_cca)) if col_cca else "—"),
+                ("Capacity of Channel (Cfs)", fmt_num(row.get(col_cap_ch)) if col_cap_ch else "—"),
+                ("Length of Canal (ft)", fmt_num(row.get(col_len_can), "ft") if col_len_can else "—"),
+                ("DSL (ft)", fmt_num(row.get(col_dsl), "ft") if col_dsl else "—"),
+                ("NPL (ft)", fmt_num(row.get(col_npl), "ft") if col_npl else "—"),
+                ("HFL (ft)", fmt_num(row.get(col_hfl), "ft") if col_hfl else "—"),
+                ("River / Nullah", row.get(col_river) if col_river else np.nan),
+                ("Year of Completion", fmt_num(row.get(col_year)) if col_year else "—"),
+                ("Catchment Area (Sq. Km)", fmt_num(row.get(col_catch)) if col_catch else "—"),
+            ]
+            ncols = 2
+            for i in range(0, len(fields), ncols):
+                cols = st.columns(ncols)
+                for j, (label, value) in enumerate(fields[i:i+ncols]):
+                    with cols[j]:
+                        render_card(label, value)
         else:
             st.info("Pick a dam to see comparison statements.")
 
-    # Right: compact highlights; no tall table; no 'max capacity single'
+    # Right: highlights (unchanged from v5)
     with c2:
         st.markdown("## 🌟 Highlights (Organization)")
         st.markdown(
@@ -185,8 +214,7 @@ with tab_overview:
             .hvalue{font-size:1.6rem;font-weight:800;margin-top:6px;color:#111}
             .hsub{font-size:0.85rem;color:#777;margin-top:2px}
             </style>
-            """,
-            unsafe_allow_html=True
+            """, unsafe_allow_html=True
         )
         def card(label, value, sub=None):
             v = "—" if value is None else value
@@ -197,45 +225,35 @@ with tab_overview:
         len_series = coerce_num(df[col_len_can]) if col_len_can else None
         catch_series = coerce_num(df[col_catch]) if col_catch else None
 
-        # Two-column grid to keep vertical height compact
         st.markdown('<div class="hgrid">', unsafe_allow_html=True)
         card("Total Dams", f"{len(df):,}")
-
-        # Dams by district — show compact chips for ALL districts
         if col_district:
             counts = df.groupby(col_district).size().sort_values(ascending=False)
-            # Build one card that lists "Dist: count" in multiple lines, truncated to keep compact
             lines = [f"{d}: {int(n):,}" for d, n in counts.items()]
             display_text = " · ".join(lines)
             card("Dams by District", display_text)
-
         if col_cca:
             g = df.assign(_cca=cca_series).groupby(col_district, dropna=False)["_cca"].sum().sort_values(ascending=False)
             if len(g) > 0:
                 top_dist, top_cca = g.index[0], g.iloc[0]
                 card("Max CCA (sum) — District", f"{top_dist}", sub=f"{top_cca:,.0f} Acres")
-
         if col_len_can:
             g = df.assign(_len=len_series).groupby(col_district, dropna=False)["_len"].sum().sort_values(ascending=False)
             if len(g) > 0:
                 top_dist, top_len = g.index[0], g.iloc[0]
                 card("Max Canal Length (sum) — District", f"{top_dist}", sub=f"{top_len:,.0f} ft")
-
         if col_catch:
             g = df.assign(_cat=catch_series).groupby(col_district, dropna=False)["_cat"].sum().sort_values(ascending=False)
             if len(g) > 0:
                 top_dist, top_catch = g.index[0], g.iloc[0]
                 card("Max Catchment Area (sum) — District", f"{top_dist}", sub=f"{top_catch:,.0f} Sq. Km")
-
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # Details (cards) can remain below if needed; omitted here to keep above-the-fold tight
 
 with tab_explore:
     st.subheader("Filter Dams")
-    # Build dynamic filters for numeric ranges and categorical
     work = df.copy()
 
+    # Range filter that LETS NaN PASS (important)
     def range_filter(label, col):
         s = coerce_num(work[col]) if col else None
         if s is None:
@@ -245,32 +263,29 @@ with tab_explore:
         if not np.isfinite(mn) or not np.isfinite(mx) or mn == mx:
             return None
         val = st.slider(label, min_value=float(mn), max_value=float(mx), value=(float(mn), float(mx)))
-        mask = (s >= val[0]) & (s <= val[1])
+        mask = (s.between(val[0], val[1])) | (s.isna())  # <-- include NaN rows
         return mask
 
-    # Grid of filters
     colA, colB = st.columns(2)
     masks = []
 
     with colA:
-        m = range_filter("Height (ft) range", col_height);           masks.append(m)
-        m = range_filter("Gross Storage Capacity (Aft) range", col_gross); masks.append(m)
-        m = range_filter("C.C.A. (Acres) range", col_cca);           masks.append(m)
-        m = range_filter("Length of Canal (ft) range", col_len_can); masks.append(m)
-        m = range_filter("DSL (ft) range", col_dsl);                 masks.append(m)
+        masks.append(range_filter("Height (ft) range", col_height))
+        masks.append(range_filter("Gross Storage Capacity (Aft) range", col_gross))
+        masks.append(range_filter("C.C.A. (Acres) range", col_cca))
+        masks.append(range_filter("Length of Canal (ft) range", col_len_can))
+        masks.append(range_filter("DSL (ft) range", col_dsl))
     with colB:
-        m = range_filter("Live storage (Aft) range", col_live);      masks.append(m)
-        m = range_filter("Capacity of Channel (Cfs) range", col_cap_ch); masks.append(m)
-        m = range_filter("NPL (ft) range", col_npl);                 masks.append(m)
-        m = range_filter("HFL (ft) range", col_hfl);                 masks.append(m)
-        # Year of completion
+        masks.append(range_filter("Live storage (Aft) range", col_live))
+        masks.append(range_filter("Capacity of Channel (Cfs) range", col_cap_ch))
+        masks.append(range_filter("NPL (ft) range", col_npl))
+        masks.append(range_filter("HFL (ft) range", col_hfl))
         if col_year:
             s = coerce_num(work[col_year])
             if s.notna().any():
                 mn, mx = int(np.nanmin(s)), int(np.nanmax(s))
                 yr = st.slider("Year of Completion range", min_value=int(mn), max_value=int(mx), value=(int(mn), int(mx)))
-                masks.append((s >= yr[0]) & (s <= yr[1]))
-        # River/Nullah
+                masks.append((s.between(yr[0], yr[1])) | (s.isna()))
         if col_river:
             options = sorted([x for x in work[col_river].dropna().unique().tolist() if x])
             sel = st.multiselect("River / Nullah", options)
@@ -278,18 +293,14 @@ with tab_explore:
                 masks.append(work[col_river].isin(sel))
             else:
                 masks.append(None)
+        masks.append(range_filter("Catchment Area (Sq. Km) range", col_catch))
 
-        # Catchment area
-        m = range_filter("Catchment Area (Sq. Km) range", col_catch); masks.append(m)
-
-    # Apply masks
     filt = pd.Series(True, index=work.index)
     for m in masks:
         if m is not None:
             filt = filt & m
     filtered = work[filt].copy()
 
-    # Show counts
     st.markdown("---")
     c1, c2 = st.columns([1,1])
     with c1:
@@ -301,6 +312,7 @@ with tab_explore:
             st.markdown("**Dams by District (filtered)**")
             st.table(counts)
 
-    # Optionally preview first few dams
     st.markdown("**Sample results**")
-    st.dataframe(filtered[[c for c in [col_name, col_district, col_height, col_cca, col_year] if c]].head(20), use_container_width=True)
+    # Use st.table, not dataframe, to avoid CSS preloading issue
+    cols = [c for c in [col_name, col_district, col_height, col_cca, col_year] if c]
+    st.table(filtered[cols].head(20))
