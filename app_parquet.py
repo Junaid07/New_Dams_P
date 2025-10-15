@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -30,7 +29,7 @@ def load_parquet_or_convert():
         raise RuntimeError("Place All_Dams.parquet or All_Dams.xlsx next to the app.")
     for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype(str).str.strip()
-    alias = {c.lower().replace("\\n"," ").replace("  "," ").strip(): c for c in df.columns}
+    alias = {c.lower().replace("\n"," ").replace("  "," ").strip(): c for c in df.columns}
     return df, alias, loaded_from
 
 def best_match(alias, include_words, exclude_words=None):
@@ -241,6 +240,10 @@ with tab_explore:
     st.subheader("Filter Dams")
     work = df.copy()
 
+    # NEW: District filter (multiselect). Leave empty = all districts.
+    dist_opts = sorted([str(x) for x in work[col_district].dropna().unique().tolist()]) if col_district else []
+    selected_dists = st.multiselect("District(s)", dist_opts, default=[])
+
     def range_filter(label, col):
         s = coerce_num(work[col]) if col else None
         if s is None:
@@ -254,6 +257,13 @@ with tab_explore:
 
     colA, colB = st.columns(2)
     masks = []
+
+    # Apply district mask first (only if the user selected one or more)
+    if selected_dists:
+        masks.append(work[col_district].astype(str).isin(selected_dists))
+    else:
+        masks.append(None)
+
     with colA:
         masks.append(range_filter("Height (ft) range", col_height))
         masks.append(range_filter("Gross Storage Capacity (Aft) range", col_gross))
@@ -297,7 +307,6 @@ with tab_explore:
     st.markdown("**Dams (filtered)**")
     names = filtered[col_name].dropna().astype(str).tolist() if col_name else []
     if names:
-        # Render as ordered list (1., 2., ...) without literal \n
         lines = [f"{i}. {n}" for i, n in enumerate(names, start=1)]
         html = "<br>".join(lines)
         st.markdown(html, unsafe_allow_html=True)
