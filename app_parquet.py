@@ -185,15 +185,12 @@ with tab_overview:
                 ("Year of Completion", fmt_num(row.get(col_year)) if col_year else "—"),
                 ("Catchment Area (Sq. Km)", fmt_num(row.get(col_catch)) if col_catch else "—"),
             ]
-            # Render as button-like expanders across the page
-            ncols = 3
+            ncols = 2
             for i in range(0, len(fields), ncols):
                 cols = st.columns(ncols)
                 for j, (label, value) in enumerate(fields[i:i+ncols]):
                     with cols[j]:
-                        header = f"{label}: {value if (value not in [None, '—']) else '—'}"
-                        with st.expander(header, expanded=False):
-                            st.write(value if value not in [None, '—'] else '—')
+                        render_card(label, value)
         else:
             st.info("Pick a dam to see comparison statements.")
 
@@ -202,7 +199,7 @@ with tab_overview:
         st.markdown(
             """
             <style>
-            .hstack {display:flex;flex-direction:column;gap:12px;}
+            .hgrid {display:grid;grid-template-columns:1fr 1fr;gap:12px;}
             .hcard{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px 16px;
                    box-shadow:0 2px 8px rgba(0,0,0,0.04);}
             .hlabel{font-size:0.9rem;color:#555;font-weight:600}
@@ -218,7 +215,7 @@ with tab_overview:
         cca_series = coerce_num(df[col_cca]) if col_cca else None
         len_series = coerce_num(df[col_len_can]) if col_len_can else None
         catch_series = coerce_num(df[col_catch]) if col_catch else None
-        st.markdown('<div class="hstack">', unsafe_allow_html=True)
+        st.markdown('<div class="hgrid">', unsafe_allow_html=True)
         card("Total Dams", f"{len(df):,}")
         if col_district:
             counts = df.groupby(col_district).size().sort_values(ascending=False)
