@@ -3,9 +3,9 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from datetime import datetime
-import os
+import os, re
 
-st.set_page_config(page_title="Small Dams — Cards & Comparisons", page_icon="🏞️", layout="wide")
+st.set_page_config(page_title="Small Dams — Cards & Comparisons", page_icon="💧", layout="wide")
 
 PARQUET_PATH = "All_Dams.parquet"
 XLSX_PATH = "All_Dams.xlsx"
@@ -31,18 +31,27 @@ def load_parquet_or_convert():
             loaded_from = "xlsx (parquet save failed)"
     if df is None:
         raise RuntimeError("Place All_Dams.parquet or All_Dams.xlsx next to the app.")
-    # Normalize strings
+    # Normalize strings and header aliases
     for c in df.select_dtypes(include=["object"]).columns:
         df[c] = df[c].astype(str).str.strip()
-    alias = {c.lower().replace("\\n"," "): c for c in df.columns}
+    alias = {c.lower().replace("\\n"," ").replace("  "," ").strip(): c for c in df.columns}
     return df, alias, loaded_from
 
-def find_col(alias, keys):
-    for k in alias.keys():
-        for t in keys:
-            if t in k:
-                return alias[k]
-    return None
+def best_match(alias, include_words, exclude_words=None):
+    """Return column whose alias string contains ALL include_words and NONE of exclude_words.
+    Chooses the longest alias (most specific) when multiple match."""
+    if exclude_words is None:
+        exclude_words = []
+    include_words = [w.lower() for w in include_words]
+    exclude_words = [w.lower() for w in exclude_words]
+    candidates = []
+    for akey, original in alias.items():
+        if all(w in akey for w in include_words) and not any(w in akey for w in exclude_words):
+            candidates.append((len(akey), original))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)  # prefer longest text
+    return candidates[0][1]
 
 def coerce_num(series):
     if series.dtype == object:
@@ -50,11 +59,8 @@ def coerce_num(series):
     return pd.to_numeric(series, errors="coerce")
 
 @st.cache_data(show_spinner=False)
-def prepare(df, col_district, col_name, col_height, col_cca, col_year, col_lat=None, col_lon=None):
+def prepare(df, col_district, col_name, col_height, col_cca, col_year):
     df[col_name] = df[col_name].replace({"": np.nan, "nan": np.nan})
-    if col_lat and col_lon and col_lat in df and col_lon in df:
-        df[col_lat] = coerce_num(df[col_lat]).astype("float32")
-        df[col_lon] = coerce_num(df[col_lon]).astype("float32")
     if col_height: df[col_height] = coerce_num(df[col_height]).astype("float32")
     if col_cca:    df[col_cca]    = coerce_num(df[col_cca]).astype("float32")
     if col_year:
@@ -90,7 +96,6 @@ def cmp_sentence(row, frame, metric_col, unit, col_name, scope_label="organizati
         return f"{unit['label']}: This is the **highest** in the {scope_label} ({max_val:,.0f} {unit['abbr']} at {max_dam})."
     if np.isclose(value, min_val, equal_nan=False):
         return f"{unit['label']}: This is the **lowest** in the {scope_label} ({min_val:,.0f} {unit['abbr']})."
-    # Difference wording
     diff = max_val - value
     return f"{unit['label']}: **{diff:,.0f} {unit['abbr']} less** than the highest in the {scope_label} ({max_val:,.0f} {unit['abbr']} at {max_dam})."
 
@@ -103,24 +108,25 @@ except Exception as e:
     st.error(f"Data load failed: {e}")
     st.stop()
 
-# Detect columns (robust to slight header variations/newlines)
-col_district = find_col(alias, ["district"])
-col_name     = find_col(alias, ["name of dam", "dam name"])
-col_height   = find_col(alias, ["height", "height (ft)"])
-col_cca      = find_col(alias, ["c.c.a", "cca", "c.c.a. (acres)", "acres"])
-col_year     = find_col(alias, ["year of completion", "year"])
-# Additional detail fields requested for cards
-col_type     = find_col(alias, ["type of dam"])
-col_cost     = find_col(alias, ["completion cost", "cost", "(million)"])
-col_gross    = find_col(alias, ["gross storage capacity", "(aft)"])
-col_live     = find_col(alias, ["live storage", "(aft)"])
-col_cap_ch   = find_col(alias, ["capacity of channel", "(cfs)"])
-col_len_can  = find_col(alias, ["length of canal", "(ft)"])
-col_dsl      = find_col(alias, ["dsl", "(ft)"])
-col_npl      = find_col(alias, ["npl", "(ft)"])
-col_hfl      = find_col(alias, ["hfl", "(ft)"])
-col_river    = find_col(alias, ["river", "nullah"])
-col_catch    = find_col(alias, ["catchment area", "(sq. km)", "sq. km"])
+# Precise column detection
+col_district = best_match(alias, ["district"])
+col_name     = best_match(alias, ["name of dam"]) or best_match(alias, ["dam name"])
+col_height   = best_match(alias, ["height"])  # will match "height (ft)" etc.
+col_cca      = best_match(alias, ["c.c.a"]) or best_match(alias, ["cca"])
+col_year     = best_match(alias, ["year of completion"]) or best_match(alias, ["year"])
+
+# Cards (precise names; avoid collisions on '(ft)' and '(aft)')
+col_type     = best_match(alias, ["type of dam"])
+col_cost     = best_match(alias, ["completion cost"])
+col_gross    = best_match(alias, ["gross storage capacity"])  # not just "(aft)"
+col_live     = best_match(alias, ["live storage"])            # not just "(aft)"
+col_cap_ch   = best_match(alias, ["capacity of channel"])
+col_len_can  = best_match(alias, ["length of canal"])
+col_dsl      = best_match(alias, ["dsl"], exclude_words=["length of canal"])  # force DSL only
+col_npl      = best_match(alias, ["npl"])
+col_hfl      = best_match(alias, ["hfl"])
+col_river    = best_match(alias, ["river"]) or best_match(alias, ["nullah"])
+col_catch    = best_match(alias, ["catchment area"])
 
 required = [col_district, col_name]
 missing = [c for c in required if c is None]
@@ -131,10 +137,21 @@ if missing:
 df = prepare(df, col_district, col_name, col_height, col_cca, col_year)
 
 # -------------------------
-# UI
+# Header / Title
 # -------------------------
+st.markdown(
+    """
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+      <div style="font-size:36px">💧</div>
+      <div style="font-size:36px">🏞️</div>
+      <div style="font-size:28px;font-weight:800;">Small Dams Dashboard</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.caption("Parquet-optimized. Source: " + (loaded_from or "unknown"))
 
+# Filters
 left, right, _ = st.columns([1,1,1])
 with left:
     districts = ["All"] + sorted([str(x) for x in df[col_district].dropna().unique().tolist()])
@@ -149,20 +166,20 @@ st.markdown("---")
 # -------------------------
 # Selected + Comparison sentences
 # -------------------------
-st.subheader("🎯 Selected")
 if dam != "All":
     row = scope_df[scope_df[col_name] == dam].iloc[0]
-    st.markdown(f"### {row[col_name]}")
-    st.markdown("**Organization comparison**")
-    st.write(cmp_sentence(row, df, col_height, {"label":"Height (ft)", "abbr":"ft"}, col_name, "organization"))
-    st.write(cmp_sentence(row, df, col_cca, {"label":"C.C.A (Acres)", "abbr":"Acres"}, col_name, "organization"))
-    st.write(cmp_sentence(row, df, "Age (years)", {"label":"Age (years)", "abbr":"years"}, col_name, "organization"))
-
+    st.markdown(f"### Selected Dam: **{row[col_name]}**")
+    with st.container():
+        st.markdown("**Organization comparison**")
+        st.write(cmp_sentence(row, df, col_height, {"label":"Height (ft)", "abbr":"ft"}, col_name, "organization"))
+        st.write(cmp_sentence(row, df, col_cca, {"label":"C.C.A (Acres)", "abbr":"Acres"}, col_name, "organization"))
+        st.write(cmp_sentence(row, df, "Age (years)", {"label":"Age (years)", "abbr":"years"}, col_name, "organization"))
     if district != "All":
-        st.markdown(f"**{district} comparison**")
-        st.write(cmp_sentence(row, scope_df, col_height, {"label":"Height (ft)", "abbr":"ft"}, col_name, district))
-        st.write(cmp_sentence(row, scope_df, col_cca, {"label":"C.C.A (Acres)", "abbr":"Acres"}, col_name, district))
-        st.write(cmp_sentence(row, scope_df, "Age (years)", {"label":"Age (years)", "abbr":"years"}, col_name, district))
+        with st.container():
+            st.markdown(f"**{district} comparison**")
+            st.write(cmp_sentence(row, scope_df, col_height, {"label":"Height (ft)", "abbr":"ft"}, col_name, district))
+            st.write(cmp_sentence(row, scope_df, col_cca, {"label":"C.C.A (Acres)", "abbr":"Acres"}, col_name, district))
+            st.write(cmp_sentence(row, scope_df, "Age (years)", {"label":"Age (years)", "abbr":"years"}, col_name, district))
 else:
     st.info("Pick a dam to see comparison statements.")
 
@@ -172,7 +189,6 @@ else:
 st.markdown("---")
 st.subheader("📋 Details")
 
-# Custom CSS for big bold cards
 st.markdown(
     """
     <style>
@@ -208,32 +224,27 @@ def render_card(title, val):
 
 if dam != "All":
     row = scope_df[scope_df[col_name] == dam].iloc[0]
-    # Value helpers with units / formatting
     def fmt_num(v, suffix=""):
         if pd.isna(v): return "—"
-        try:
-            return f"{float(v):,.0f}{(' ' + suffix) if suffix else ''}"
-        except Exception:
-            return f"{v} {suffix}".strip()
+        try: val = float(v); return f"{val:,.0f}{(' ' + suffix) if suffix else ''}"
+        except Exception: return f"{v} {suffix}".strip()
 
-    # Build a grid of cards (4 per row)
     fields = [
         ("Type of Dam", row.get(col_type) if col_type else np.nan),
         ("Completion Cost (million)", fmt_num(row.get(col_cost), "" if col_cost is None else "")),
-        ("Gross Storage Capacity (Aft)", fmt_num(row.get(col_gross))),
-        ("Live storage (Aft)", fmt_num(row.get(col_live))),
+        ("Gross Storage Capacity (Aft)", fmt_num(row.get(col_gross)) if col_gross else "—"),
+        ("Live storage (Aft)", fmt_num(row.get(col_live)) if col_live else "—"),
         ("C.C.A. (Acres)", fmt_num(row.get(col_cca)) if col_cca else "—"),
-        ("Capacity of Channel (Cfs)", fmt_num(row.get(col_cap_ch))),
-        ("Length of Canal (ft)", fmt_num(row.get(col_len_can), "ft")),
-        ("DSL (ft)", fmt_num(row.get(col_dsl), "ft")),
-        ("NPL (ft)", fmt_num(row.get(col_npl), "ft")),
-        ("HFL (ft)", fmt_num(row.get(col_hfl), "ft")),
+        ("Capacity of Channel (Cfs)", fmt_num(row.get(col_cap_ch)) if col_cap_ch else "—"),
+        ("Length of Canal (ft)", fmt_num(row.get(col_len_can), "ft") if col_len_can else "—"),
+        ("DSL (ft)", fmt_num(row.get(col_dsl), "ft") if col_dsl else "—"),
+        ("NPL (ft)", fmt_num(row.get(col_npl), "ft") if col_npl else "—"),
+        ("HFL (ft)", fmt_num(row.get(col_hfl), "ft") if col_hfl else "—"),
         ("River / Nullah", row.get(col_river) if col_river else np.nan),
         ("Year of Completion", fmt_num(row.get(col_year), "")),
-        ("Catchment Area (Sq. Km)", fmt_num(row.get(col_catch))),
+        ("Catchment Area (Sq. Km)", fmt_num(row.get(col_catch)) if col_catch else "—"),
     ]
 
-    # Render in 4-column rows
     ncols = 4
     for i in range(0, len(fields), ncols):
         cols = st.columns(ncols)
@@ -250,7 +261,7 @@ tabs = st.tabs(["Organization-wide"] + ([f"{district} only"] if district != "All
 def safe_table(df_in):
     try:
         st.table(df_in)
-    except Exception as e:
+    except Exception:
         st.write(df_in)
 
 if col_height:
