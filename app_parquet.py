@@ -144,12 +144,12 @@ st.markdown(
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
       <div style="font-size:36px">💧</div>
       <div style="font-size:36px">🏞️</div>
-      <div style="font-size:28px;font-weight:800;">Small Dams Dashboard</div>
+      <div style="font-size:28px;font-weight:800;">Overview of Small Dams in Potohar Zone</div>
     </div>
     """,
     unsafe_allow_html=True,
 )
-st.caption("Parquet-optimized. Source: " + (loaded_from or "unknown"))
+#st.caption("Parquet-optimized. Source: " + (loaded_from or "unknown"))
 
 # Filters
 left, right, _ = st.columns([1,1,1])
