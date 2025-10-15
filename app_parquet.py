@@ -113,7 +113,7 @@ st.markdown(
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
       <div style="font-size:36px">💧</div>
       <div style="font-size:36px">🏞️</div>
-      <div style="font-size:28px;font-weight:800;">Overview of Small Dams in Potohar Zone</div>
+      <div style="font-size:28px;font-weight:800;">Overview of Completed Small Dams in Potohar Zone</div>
     </div>
     """,
     unsafe_allow_html=True,
