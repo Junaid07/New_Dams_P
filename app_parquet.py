@@ -118,7 +118,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-#st.caption("Parquet-optimized. Source: " + (loaded_from or "unknown"))
+st.caption("**Developer: Junaid Ahmad, PhD**")
+
 
 tab_overview, tab_explore = st.tabs(["Overview", "Explore & Filter"])
 
